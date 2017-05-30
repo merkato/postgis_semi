@@ -1,0 +1,59 @@
+\newgeometry{left=1cm,top=1.5cm}
+\chapter{Konfiguracja i zabezpieczenie serwera}
+	\section{Podstawowe ustawienia}
+	Podstawowe ustawienia serwera bazy danych PostgreSQL znajdują się w plikach konfiguracyjnych \textit{postgresql.conf} i \textit{pg\_hba.conf}	
+	Ich lokalizacje zależne są od systemu operacyjnego, zobacz przykłady poniżej \\
+\renewcommand{\arraystretch}{1.5}
+	\begin{center}
+	\begin{tabular}{c c}
+Debian/Ubuntu & Windows \\ 
+\hline
+\colorbox{code-gray}{/etc/postgresql/9.5/main/postgresql.conf} & 					  \colorbox{code-gray}{X:/Program Files/PostgreSQL/9.5/data} \\
+	\end{tabular}
+	\end{center}
+Istnieje możliwość wskazania innej niż standardowa lokalizacji plików \textit{pg\_hba.conf}, \textit{pg\_ident.conf} oraz lokalizacji klastra bazodanowego (systemu plików bazy na dysku). Zmian tych dokonujemy w pliku \textit{postgresql.conf}. Każdorazowa zmiana tych ustawień wymaga restartu serwera. 
+	
+	\section{Zabezpieczenie TCP/IP}
+Podstawową metodą zabezpieczenia serwera bazy danych jest ograniczenie dostępu dla osób niepowołanych. Pomijając fizyczne metody zabezpieczenia (np. sieć wydzielona) najprostszym sposobem jest zmiana standardowych ustawień daemona psql w zakresie protokołu TCP/IP. W tym celu używamy dyrektyw \textit{listen\_adresses} oraz \textit{port}. Dla listen\_adresses domyślnym ustawieniem jest \textit{localhost}, możliwe wartości to * jako wskazanie wszystkich adresów IP, lub lista adresów przedzielonych przecinkami. W tej sytuacji warto wskazać jeden konkretny adres IP dostępny dla wszystkich klientów serwera, oraz nietypowy numer portu.
+
+\begin{lstlisting}
+listen_addresses = 'localhost'
+port = 49666
+max_connections = 100
+\end{lstlisting}
+
+	\section{Autentykacja}
+Kolejnym krokiem konfiguracji dostępu do baz danych jest wykorzystanie Host Based Authentication. PostgreSQL pozwala na zdefiniowanie dozwolonych metod dostępu na poziomie konkretnych hostów lub sieci, baz danych, użytkowników serwera. W tym celu w pliku \textit{pg\_hba.conf} tworzymy kolejne wpisy wg następującego schematu:
+\begin{center}
+\colorbox{code-gray}{CONNECTION   DATABASE  USER  ADDRESS  METHOD  [OPTIONS]}.
+\end{center}
+Oto dopuszczalne wartości \textit{Connection type}:
+
+\begin{itemize}
+	\item local
+	\item host
+	\item hostssl
+	\item hostnossl
+\end{itemize}
+
+Typ \textit{local} zakłada dostęp wyłącznie poprzez Unix-domain socket. Jest to metoda przewidziana głównie dla połączeń administracyjnych. Metoda \textit{host} zakłada wykorzystanie standardowego TCP/IP, a gdy jest dostępny również SSL. Pozostałe typy wymuszają konkretne zachowanie SSL.
+
+Przykładowy plik pg\_hba.conf
+\begin{lstlisting}
+# Database administrative login by Unix domain socket
+local   all             postgres                                peer
+
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# "local" is for Unix domain socket connections only
+local   all             all                                     trust
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            md5
+host    all             all             samenet                 cert
+hostssl	all             all             192.168.0.0/24			ldap
+# IPv6 local connections:
+host    all             all             ::1/128                 trust
+\end{lstlisting}
+
+%\section{Konfiguracja wydajności}
+

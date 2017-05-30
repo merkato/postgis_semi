@@ -1,0 +1,224 @@
+\chapter{Hurtowe importowanie danych}
+	\section{QGIS DB Manager}
+	
+Podstawowym narzędziem dla zasilania bazy danych informacją przestrzenną jest QGIS wraz z swoim domyślnie uaktywnionym rozszerzeniem QGIS DB Manager. Przy pomoc tego jednego narzędzia możemy w QGIS zarządzać bazami danch PostgreSQL, SQLite, oraz GeoPackage, a także tzw. warstwami wirtualnymi - zapytaniami SQLite wykorzystującymi warstwy wektorowe OGR.
+
+W menadżerze bazy danych, aby rozpocząć importowanie, musimy połączyć się z istniejącą, zdefiniowaną bazą danych. Po nawiązaniu połączenia w menu \colorbox{code-gray}{Tabela->Importuj warstwę/plik}	
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=4cm]{qgis_db_manager_import_warstwy_wektorowej_menu}
+	\caption{Importowanie danych - menu programu}
+\end{figure}
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=6cm]{qgis_db_manager_import_warstwy_wektorowej}
+	\caption{Importowanie danych - okno dialogowe}
+\end{figure}
+Następnie wskazujemy interesujące nas parametry wejściowe. Warto zwrócić uwagę na pola określające nazwę kolumny geometrii (do późniejszego wykorzystania w zapytaniach), kodowanie wejściowe (istotne przy imporcie warstw stworzonych w ArcGIS), wejściowy i docelowy układ współrzędnych (tu jeśli nie zamierzamy dokonywać konwersji układu wypełniamy tylko wartość dla docelowego układu). W kolejnych wierszach znajdziemy przydatne narzędzia dla zwiększenia funkcjonalności naszej tabeli. Tworzenie indeksu przestrzennego powinno być dla nas nawykiem - zawsze pomaga on przyśpieszyć zapytania oparte o geometrię obiektu. Zamiana nazw pól na małe litery uprości nasze przyszłe zapytania, ponieważ PostgreSQL jest wrażliwy na wielkość liter w nazwach schematu, tabeli i kolumny. Tworzenie obiektów elementarnych gdy chcemy zadbać o rozbicie multipoligonów na obiekty elementarne.
+	%\section{osm2pgsql}
+	
+	
+	\section{Imposm3}
+	
+Imposm3 jest opartym o język Go, oraz biblioteki libleveldb, libgeos i protobuf. Obecnie obsługiwane są wyłącznie systemy operacyjne typu Linux. Dane wejściowe muszą być w formacie \textit{Protobuffer} (PBF). W linii poleceń wskazujemy docelową bazę danych, oraz schemat. Następnie przy pomocy LevelDB program odfiltrowuje z zbioru PBF obiekty wskazane w tzw. mappingu (schemacie bazy). Wynikowa tabela tworzona jest w układzie EPSG:2180 (PUWG 1992).
+
+Przykładowe wywołanie Imposm3:
+\begin{lstlisting}
+imposm import -connection postgis://osm:osm@localhost:5432/osm -mapping mapping.yaml -read plik.pbf -write -overwritecache -dbschema-import nasz\_schemat  
+\end{lstlisting}
+	
+	\section{Pakiety typu ETL}
+	
+	ETL czyli Extract, Transform, Load to pakiety przetwarzania danych, również przestrzennych, które pozwalają przygotować kompletne rozwiązania dla importu danych do bazy lub ich zapis do plików. 
+	
+	\begin{itemize}
+		\item Safe Software FME - jest jednym z najbardziej rozpowszechnionych pakietów komercyjnych na rynku, obsługującym ponad 200 różnych formatów przestrzennych i bazodanowych
+		\item ArcGIS Data Interoperability Extension - rozszerzenie ArcGIS o trochę mniejszych możliwościach
+		\item Talend Studio
+		\item GeoKettle - opartę o Javę
+		\item Hale Studio - 
+	\end{itemize}
+	
+	Jednym z przykładów wykorzystania ETL może być złączenie bazy danych BDOO oraz zbiorów tematycznych poświęconych np. zaopatrzeniu w wodę, w jedną spójną bazę danych o ujednoliconych nazwach pól.
+	
+	%\section{OpenStreetMap - formaty danych}
+	
+	
+\chapter{Rozszerzenia PostGIS}
+	\section{PostGIS Raster}
+ PostGIS Raster to rozszerzenie pozwalające wykorzystywać pliki rastrowe, obsługiwane przez GDAL bezpośrednio z poziomu bazy danych i wykonywać na nich operacje analityczne.
+	 \subsection{Import danych}
+Podstawowym sposobem rozpoczęcia pracy z rastrami w PostGIS, jest ich zaimportowanie do bazy przy pomocy \textit{raster2pgsql}. Przykładowe wywołanie programu:
+\begin{center}
+\colorbox{code-gray}{raster2pgsql -s 4326 -C -Y -l 2,4 -I -F -t 1000x1000 *.tif eudem.dem | psql -d baza -U uzytkownik}
+\end{center}
+	W pierwszej części polecenia wskazujemy opcje importowania, takie jak układ współrzędnych (-s XXXX), wykorzystanie składni COPY zamiast INSERT (-Y), wskazanie które poziomy powiększenia (piramidy) powinny zostać utworzone (-l x,y,z). Kolejno wskazujemy plik źródłowy w formacie obsługiwanym przez GDAL, w naszym przypadku korzystamy z wildcarda *, aby wczytać zawartość całego katalogu, oraz schemę i tabelę w bazie danych, do której ma nastąpić import. W drugiej części wywołania wskazujemy czy wygenerowany kod SQL ma zostać zapisany do pliku, czy przekazany bezpośrednio (pipe) do procesu serwera bazy danych psql.
+	Sprawdźmy jak wygląda wynik tej operacji. W konsoli psql wpisujemy \colorbox{code-gray}{\textbackslash dt eudem.*} i uzyskujemy listę tabel w schemie \textit{eudem}:
+	\begin{lstlisting}
+		postgis_semi-# \dt eudem.*
+			List of relations
+			Schema |  Name   | Type  | Owner 
+			--------+---------+-------+-------
+			eudem  | dem     | table | osm
+			eudem  | o_2_dem | table | osm
+			eudem  | o_4_dem | table | osm
+			eudem  | o_8_dem | table | osm
+			(4 rows)
+			
+			postgis_semi-# 
+	\end{lstlisting}
+	
+	\subsection{Operacje DEM}
+	Dla szczególnego rodzaju operacji na rastrach PostGIS oferuje gotowe funkcje realizujące obliczenia na numerycznym modelu terenu. Są to operacje przygotowujące mapę spadków (slope), ekspozycji, cieniowanie rzeźby terenu, oraz współczynniki TPI i TRI. 
+	
+	\begin{lstlisting}
+		SELECT ST_Slope(rast, DEGREES, 1.0) FROM eudem.dem;
+	\end{lstlisting}	
+	wygeneruje mapę nachylenia stoku (spadku). Wszystkie parametry poza kolumną z danymi rastrowymi są opcjonalne, ale pozwalają np. na przeliczenie jednostek Z z stopni geograficznych do metrów (scale=111200).
+
+	\subsection{Eksport danych}
+Eksport przy pomocy gdal
+	\begin{lstlisting}
+	gdal_translate PG:"host=localhost port=5434 user=postgres
+	dbname=mastering_postgis schema=data_import table=gray_50m_partial
+	where='filename=\'gray_50m_partial_bl.tif\'' mode=2" -of GTiff -
+	outsize 50% 50% gray_50m_partial_small.tiff
+	\end{lstlisting}	
+	Ekport BBOX ale bez docinania, wybiera całe kafle.
+	\begin{lstlisting}	
+	gdal_translate PG:"host=localhost port=5434 user=postgres
+	dbname=mastering_postgis schema=data_import table=gray_50m_partialwhere='ST_Intersects(rast, ST_MakeEnvelope(14,49,24,55,4326))'
+	mode=2" -of GTiff -outsize 50% 50% gray_50m_partial_small.tiff
+	\end{lstlisting}
+	Przykład trzeci - docięcie do granic BBOXa
+	\begin{lstlisting}		
+	gdal_translate PG:"host=localhost port=5434 user=postgres
+	dbname=mastering_postgis schema=data_import table=gray_50m_partial
+	where='ST_Intersects(rast, ST_MakeEnvelope(14,49,24,55,4326))'
+	mode=2" -of GTiff -projwin 14 55 24 49 poland.tiff	
+    \end{lstlisting}
+
+	\section{PgRouting}
+	
+	pgRouting rozszerza PostGIS o możliwości routingu (wyznaczania drogi) na podstawie przestrzennej bazy danych. Jest szczególnie przydatny w zastosowaniach związanych z OSM, główniez powodu gotowych narzędzi do importu danych w formacie gotowym do wykorzystania przez pgRouting (np. przy pomocy osm2po).
+	
+	Następujące algorytmy obliczeniowe dostępne są w aktualnej wersji rozszerzenia:
+	\begin{itemize}
+		\item All Pairs Shortest Path, Johnson’s Algorithm
+		\item All Pairs Shortest Path, Floyd-Warshall Algorithm
+		\item Shortest Path A*
+		\item Bi-directional Dijkstra Shortest Path
+		\item Bi-directional A* Shortest Path
+		\item Shortest Path Dijkstra
+		\item Driving Distance
+		\item K-Shortest Path, Multiple Alternative Paths
+		\item K-Dijkstra, One to Many Shortest Path
+		\item Traveling Sales Person
+		\item Turn Restriction Shortest Path (TRSP)
+		
+	\end{itemize}
+	
+\subsection{Import i preprocessing danych}
+W pierwszej kolejności spróbujemy poznać strukturę tabel wymaganych przez rozszerzenie pgRouting. W tym celu przygotujemy sobie taką tabelę, na podstawie danych BDOO. Z istniejącej tabeli (warstwy) OT\_SKDR\_L wybieramy tylko atrybuty opisowe drogi, pomijając identyfikatory IIP.
+
+
+\begin{lstlisting}
+CREATE EXTENSION pgrouting;
+CREATE TABLE siec AS SELECT id, geom, x_kod, "katZarzadzania" AS typ, "klasaDrogi" AS techniczna, "materialNawierzchni" AS nawierzchnia, "liczbaJezdniDrogi" AS jezdnie, numer, "nazwaDrogi" AS nazwa FROM public.ot_skdr_l;
+\end{lstlisting}
+
+Kolejny krok to utworzenie pola dla prędkości maksymalnej, pól dla węzła początkowego i końcowego, a także pola dla kosztu - czy to czasowego, czy kilometrowego.
+
+\begin{lstlisting}
+ALTER TABLE public.siec ADD COLUMN vmax integer;
+\end{lstlisting}
+
+Kolejny krok to przeliczenie wartości vmax, przy założeniu prędkości podobnych z wymaganymi przez rozporządzenia i wytyczne KSRG. Dla autostrad i dróg szybkiego ruchu przyjmiemy prędkość 70km/h, dla dróg krajowych 60, wojewódzkich 50, dla pozostałych 40 km/h. 
+\begin{lstlisting}
+UPDATE public.siec SET Vmax = CASE 
+WHEN techniczna IN('A','S') THEN '70'::int
+WHEN typ = 'K' AND techniczna NOT IN ('A','S') THEN '60'::int
+WHEN typ = 'W' THEN '50'::int
+ELSE '40'::int
+END
+\end{lstlisting}
+Zwróćmy uwagę na konstrukcję zapytania UPDATE. Wskazujemy że aktualizowaną kolumną będzie vmax, następnie przy pomocy polecenia CASE WHEN oraz THEN tworzymy listę warunków do spełnienia, a także wartość jaka ma zostać wprowadzona, przy tym rzutujemy tą wartość na typ integer. Zakończenie jest konieczne ;)
+
+
+
+Kolejny krok to zadbanie o to aby sieć była podzielona na odcinki pomiędzy skrzyżowaniami.
+\begin{lstlisting}
+CREATE TABLE public.siec_noded AS
+SELECT
+(ST_Dump(geom)).geom AS geom
+FROM (
+SELECT ST_Node(geom) AS geom FROM (SELECT ST_Union(geom) AS geom FROM public.siec) a
+) b;
+\end{lstlisting}
+
+Zajrzyjmy do tej tabeli - jak widać, utraciliśmy dane o parametrach drogi.
+
+Połączmy dane źródłowe.
+Następnie utworzymy kolumny source i target, oraz zbudujemy topologię.
+\begin{lstlisting}
+ALTER TABLE public.siec_noded ADD COLUMN source integer;
+ALTER TABLE public.siec_noded ADD COLUMN target integer;
+SELECT pgr_createTopology('public.siec_noded', 1, 'geom');
+\end{lstlisting}
+
+\begin{lstlisting}
+ALTER TABLE public.siec_noded ADD COLUMN koszt float;
+UPDATE public.siec SET koszt = (ST_Length(geom)/1000)/"vmax"*60 
+\end{lstlisting}
+
+W ten sposób przygotowaliśmy sobie kompletną tabelę dla routingu. Spróbujemy teraz wykonać pierwsze zapytanie pgRouting. Należy pamiętać że mają one formę tzw. inner queries, a więc są to dwa zapytania, z których jedno zagnieżdżone jest jako argument funkcji pgr.
+\subsection{Zapytania}
+Najbardziej znanym algorytmem wyszukiwania drogi jest algorytm Dijkstry. Argumentami dla funkcji liczącej są punkt początkowy (source), końcowy (target), oraz wartość kosztu wyrażona w dowolnych jednostkach.
+
+\begin{lstlisting}
+SELECT * FROM pgr_dijkstra('SELECT id,source,target,koszt AS cost FROM public.siec_noded', 84400, 6549, false);
+\end{lstlisting}
+Jako wynik zwracane są kolejne segmenty drogi wyznaczonej jako ta o najniższym koszcie.
+Należy zwrócić uwagę na to że nie jest zwracana geometria dla najkrótszej drogi. Konieczne jest więc złączenie tabel na podstawie identyfikatora krawędzi (edge). Z pomocą przychodzi nam LEFT JOIN:
+\begin{lstlisting}
+SELECT id, 
+geom, 
+route.cost 
+FROM public.siec_noded e 
+JOIN (SELECT * FROM pgr_dijkstra('SELECT id,source,target,koszt AS cost FROM public.siec_noded', 84400, 6549, false)) AS route 
+ON e.id=route.edge;
+\end{lstlisting}
+
+\begin{figure}[!ht]
+	\centering
+	\includegraphics[width=8cm]{dijkstra}
+	\caption{Algorytm Dijkstry - wynik}
+\end{figure}
+Kolejnym algorytmem który wart jest naszej uwagi jest "Driving Distance". Tu jako argument podajemy punkt początkowy, tabelę kosztów, oraz koszt końcowy. Na przykład dla centrum Kielc, zasięg sieci drogowej do osiągnięcia w czasie 40 minut:
+\begin{lstlisting}
+SELECT id, 
+geom, 
+route.cost 
+FROM public.siec_noded e 
+JOIN (SELECT * FROM pgr_drivingDistance('SELECT id,source,target,koszt AS cost FROM public.siec_noded', 40874, 40)) AS route 
+ON e.id=route.edge;
+\end{lstlisting} 
+
+Wynikiem są wszystkie drogi w zasięgu. Warto zwrócić uwagę, ta funkcja potrafi również zwrócić zasięg dla wielu punktów naraz. 
+\begin{lstlisting}
+CREATE TABLE zasieg AS SELECT id, 
+geom, 
+route.cost, 
+route.from_v,
+route.agg_cost
+FROM public.siec_noded e 
+JOIN (SELECT * FROM pgr_drivingDistance('SELECT id,source,target,koszt AS cost FROM public.siec_noded', ARRAY[40874,40900], 240)) AS route 
+ON e.id=route.edge;
+\end{lstlisting}
+Jedyną istotną zmianą jest tu użycie ARRAY zamiast pojedyńczego identyfikatora, oraz wskazanie jako wyniku również route.from\_v
+
+Po wyliczeniu segmentów dostępnych możemy wyliczyć dodatkową warstwę otoczki wklęsłej.
+\begin{lstlisting}
+SELECT ST_ConcaveHull(ST_Collect(geom),0.6) FROM szkolenie.catchment_final
+\end{lstlisting}

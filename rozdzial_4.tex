@@ -1,0 +1,91 @@
+\chapter{Wersjonowanie bazy danych}
+	\section{Audit triggers}
+Najprostsze rozwiązanie do nadzoru nad zmianami w bazie danych to tzw. audit triggers. Opiera się ono na tzw. wyzwalaczach (triggers), oraz funkcji realizującej operacje logowania zmian do tabeli. Dla operacji INSERT, UPDATE i DELETE tworzy się osobną procedurę logowania, a następnie wskazuje wyzwalaczowi kiedy ma zostać wywołana.
+\begin{lstlisting}
+CREATE TRIGGER tablename_audit
+AFTER INSERT OR UPDATE OR DELETE ON tablename
+FOR EACH ROW EXECUTE PROCEDURE audit.if_modified_func();
+\end{lstlisting}	
+
+Bardziej rozbudowana wersja tego rozwiązania znajduje się pod adresem 
+\begin{lstlisting}
+https://github.com/2ndQuadrant/audit-trigger
+\end{lstlisting}
+Jego instalacja jest bardzo prosta, wywołujemy skrypt SQL przy pomocy psql, a następnie wywołujemy następującym poleceniem dodanie tabeli do audytu.
+\begin{lstlisting}
+SELECT audit.audit_table('schema.tabela');
+\end{lstlisting}
+	Istnieje również wtyczka do QGIS pozwalająca na zarządzanie operacjami rollback względem zmian dokonywanych w tabeli. Nazywa się Postgres 91 plus Auditor.
+	\section{Inne rozwiązania na rynku}
+	Innym rozwiązaniem dostępnym na rynku jest między innymi Postgis Versioning opracowane przez firmę Oslandia. Jest to wtyczka dla QGISa, przy pomocy której wszystkie operacje związane z wersjonowaniem realizujemy w interfejsie graficznym. Wymaga ona pracy na grupach warstw. 
+	Kolejnym rozwiązaniem jest wersjonowanie dostępne w QGIS 2.16+, do którego możemy się dostać z poziomu DB Managera
+\chapter{Zapytania SQL - case studies}
+
+\section{Zapytania Intersects}
+
+Pierwsze zapytanie ma za zadanie porównanie dla obiektów punktowych numeru TERYT TERC zapisanego w zbiorze, z numerem TERYT gminy na której terenie znajduje się geometria obiektu.
+
+\begin{lstlisting}
+SELECT row_number() over (),
+e.geometry,
+e.teryt_gmin,
+e.nazwa,
+p.jpt_kod_je AS computed_teryt,
+p.jpt_nazwa_ AS computed_nazwa 
+FROM public.jednostki e, gminy p
+WHERE ST_Intersects(e.geometry,p.geom) 
+AND e.teryt_gmin!=left(p.jpt_kod_je,6);
+\end{lstlisting}
+Operację tą wykonujemy przy pomocy dwóch warunków, jednego przestrzennego, przecinania się obiektów (znajdowania się w takiej konfiguracji przestrzennej, w której mają jakąkolwiek część wspólną), oraz porównania ciągów znakowych przy pomocy operatora negacji, przy czym jeden z ciągów znakowych jest wstępnie przygotowany funkcją left("string",liczba)
+
+Kolejne zadanie jest typową operacją \textbf{Zlicz punkty w poligonie}
+
+\begin{lstlisting}
+	SELECT COUNT(*) AS liczba, e.geom 
+	FROM public.jednostki j, public.gminy e 
+	WHERE st_intersects(j.geometry, e.geom) GROUP BY e.geom
+\end{lstlisting}
+Oprócz funkcji ST\_Intersects(geomA,geomB) używana jest również klauzula GROUP BY. Służy ona do agregowania tych wierszy danych które mają wspólne dane. W naszym przypadku częścią wspólną jest e.geom, zaś COUNT(*) ma za zadanie zliczenie każdorazowo ilości wierszy zaagregowanych. Warto zaznaczyć że w klauzuli GROUP BY muszą znaleźć się wszystkie obiekty (kolumny) wybrane w zapytaniu SELECT za wyjątkiem tych które są funkcjami agregującymi (COUNT, SUM, etc.)
+
+\section{Tworzenie geometrii}
+PostGIS pozwala na tworzenie nowych geometrii w oparciu o istniejące atrybuty. Szczególnymi funkcjami są ST\_Union(geom) i ST\_Collect(geom). Pierwsza wykonuje operację nazywaną \textit{Dissolve}, zaś druga tworzy tzw. GEOMETRYCOLLECTION. Zobaczmy na przykładzie połączenie wszystkich pól siatki jednokilometrowej z zbioru GUS "rozmieszczenie ludności", w których wartość jest niezerowa. 
+\begin{lstlisting}
+CREATE TABLE zamieszkane AS SELECT ST_Union(geom) AS geom FROM public.ludnosc_km WHERE tot > '0'
+\end{lstlisting}
+
+\section{Operatory zasięgu przestrzennego}
+
+\begin{lstlisting}
+&&
+\end{lstlisting}
+Operator ten zwraca stan logiczny dla porównania zasięgów przestrzennych tzw. bounding box. Najpopularniejszym  zastosowaniem tego operatora jest wstępne ograniczenie liczby rekordów i geometrii które będą później analizowane np przy pomocy funkcji ST\_Intersects()
+\begin{lstlisting}
+SELECT ST_Intersects(a.geom, (SELECT geom FROM b)) WHERE a.geom && b.geom;
+\end{lstlisting}
+
+\begin{lstlisting}
+<->
+\end{lstlisting}
+Operator ten zwraca odległość obiektów, może służyć np. do sortowania wyników po odległości.
+\begin{lstlisting}
+SELECT row_number () OVER () as qgisid,* 
+FROM warsaw.osm_emergency e 
+WHERE type='fire_hydrant' 
+AND st_intersects(e.geometry, (SELECT geometry FROM warsaw.osm_admin WHERE id='14'))
+ORDER BY e.geometry <-> (SELECT geometry FROM warsaw.osm_emergency WHERE name='Nazwa OSP' LIMIT 1)	
+\end{lstlisting}
+Jeśli potrzebujemy uzyskać samą wartość odległości, powinniśmy wykorzystać funkcję ST\_Distance(g1,g2). 
+
+\section{Zarządzanie danymi}
+Pierwsze zadanie jakie omówimy to łączenie dwóch tabel do jednego widoku. Wykorzystujemy w tym celu klauzulę UNION. Aby połączyć więcej niż dwie tabele, każdy kolejny obiekt powinien być zagnieżdżony w kolejnym nawiasie.
+
+\begin{lstlisting}
+CREATE VIEW szkolenie.rule_them_all AS (
+(SELECT * FROM szkolenie.kielecki 
+UNION 
+SELECT * FROM szkolenie2.skarzyski)
+UNION 
+SELECT * FROM szkolenie.buski)
+UNION
+SELECT * FROM szkolenie2.konecki
+\end{lstlisting}
